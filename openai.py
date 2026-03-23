@@ -1,108 +1,66 @@
 import json
-import requests
-import traceback
 import time
-AK = "" # 填入AK
-class IDEALABChat:
-    def __init__(self, ak=None):
-        self.chat_url = "https://idealab.alibaba-inc.com/api/openai/v1/chat/completions"
-        self.headers = {
-            "Authorization": f'Bearer {ak}',
-            "X-AK": f'{ak}'
-        }
-
-    def chat_completion_with_retry(self, **kwargs):
-        """同步调用，内置重试逻辑"""
-        use_messages = []
-        messages = kwargs.get("messages", [])
-        model = kwargs.get("model", "qwen-plus")
-        stream = kwargs.get("stream", False)
-        temperature = kwargs.get("temperature", 0.6)
-        frequencyPenalty = kwargs.get("frequency_penalty", None)
-        stop = kwargs.get("stop", None)
-        functions = kwargs.get("functions", None)
-        function_call = kwargs.get("function_call", None)
-        max_tokens = kwargs.pop("max_tokens", 4096)
-
-        for message in messages:
-            if not("valid" in message.keys() and message["valid"] == False):
-                use_messages.append(message)
-
-        json_data = {
-            "model": model,
-            "temperature": temperature,
-            "frequency_penalty": frequencyPenalty,
-            "messages": use_messages,
-            "max_tokens": max_tokens,
-            **kwargs
-        }
-        if stop is not None:
-            json_data.update({"stop": stop})
-        if functions is not None:
-            json_data.update({"functions": functions})
-        if function_call is not None:
-            json_data.update({"function_call": function_call})
-
-        # 内置重试逻辑，最多重试5次
-        retry_times = 5
-        last_exception = None
-
-        for attempt in range(retry_times):
-            try:
-                response = requests.post(
-                    self.chat_url,
-                    headers=self.headers,
-                    json=json_data,
-                    timeout=300
-                )
-                result = response.json()
-                time.sleep(0.5)
-                return result
-            except Exception as e:
-                last_exception = e
-                print(f"Attempt {attempt + 1}/{retry_times} failed: {e}")
-                if attempt < retry_times - 1:
-                    wait_time = min(5 * (2 ** attempt), 40)  # 指数退避，最长40秒
-                    time.sleep(wait_time)
-
-        # 所有重试都失败
-        print("Unable to generate ChatCompletion response")
-        print(f"OpenAI calling Exception: {last_exception}\n{traceback.format_exc()}")
-        raise last_exception
+from openai import OpenAI
 
 
-class idealab_chatgpt():
-    def __init__(self, ak=None):
-        self.instance = IDEALABChat(ak=ak)
+def get_client(ak=None, use_batch_api=False):
+    """
+    获取百炼 OpenAI client
+    :param ak: API key
+    :param use_batch_api: 是否使用批量API
+    :return: OpenAI client实例
+    """
+    if ak is None:
+        ak = ''  # 默认ak
 
-    def process(self, input, return_json=False, model="gpt-4o-mini-0718", temp=0.7):
-        """同步处理单个请求"""
-        messages = [{"role": "user", "content": [{"type": "text", "text": input["text"]}]}]
+    base_url = 'https://batch.dashscope.aliyuncs.com/compatible-mode/v1' if use_batch_api else 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+
+    return OpenAI(
+        base_url=base_url,
+        api_key=ak
+    )
+
+
+class bailian_chatgpt():
+    def __init__(self, ak=None, use_batch_api=False):
+        self.client = get_client(ak=ak, use_batch_api=use_batch_api)
+
+    def process(self, input, return_json=False, model="qwen-plus", temp=0.7, extra_body=None):
+        """
+        同步处理单个请求
+        :param input: 输入数据，格式为 {"text": "你的问题", "retry": 5}
+        :param return_json: 是否将返回结果解析为 JSON
+        :param model: 模型名称
+        :param temp: 温度参数
+        :param extra_body: 额外参数，如 {"enable_thinking": False}
+        :return: 模型返回的内容
+        """
+        text = input["text"]
         retry = input.get("retry", 5)
         is_success = False
         response = None
 
         while retry > 0 and not is_success:
-            kwargs = {
-                'messages': messages,
-                'model': model,
-                'stream': False,
-                'temperature': temp,
-                'seed': 0
-            }
-            # 关闭gemini的思考部分
-            if "gemini" in model:
-                kwargs['extendParams'] = {
-                    "thinkingConfig": {
-                        "thinkingBudget": 128
-                    }
-                }
             try:
-                res = self.instance.chat_completion_with_retry(**kwargs)
-                response = res['choices'][0]['message']['content']
+                # 构建请求参数
+                kwargs = {
+                    'model': model,
+                    'messages': [{'role': 'user', 'content': text}],
+                    'stream': False,
+                    'temperature': temp
+                }
+
+                # 添加额外参数
+                if extra_body is not None:
+                    kwargs['extra_body'] = extra_body
+
+                # 调用 API
+                completion = self.client.chat.completions.create(**kwargs)
+                response = completion.choices[0].message.content
                 is_success = True
-            except:
-                traceback.print_exc()
+
+            except Exception as e:
+                print(f"请求失败: {e}")
                 retry -= 1
                 time.sleep(1)
 
@@ -118,7 +76,7 @@ class idealab_chatgpt():
 if __name__ == "__main__":
     # 简单测试
     model = 'qwen-plus'
-    chatgpt = idealab_chatgpt()
+    chatgpt = bailian_chatgpt()
 
     test_input = {
         "text": "你好，请用一句话介绍一下你自己。"
