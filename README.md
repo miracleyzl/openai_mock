@@ -87,12 +87,8 @@ print(response)  # 自动解析为 Python dict
 ## 支持的模型
 
 常用模型示例：
-- `gpt-4o-mini-0718`
+- `qwen-flash`
 - `qwen-plus`
-- `qwen3-vl-plus`
-- `gemini-3-flash-preview`
-- `gemini-3-pro-preview`
-- `claude-opus-4-6`
 
 ## 运行测试
 
